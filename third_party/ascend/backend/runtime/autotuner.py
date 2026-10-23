@@ -46,7 +46,7 @@ import triton
 from triton import knobs
 from triton._C.libtriton import get_cache_invalidating_env_vars
 from triton.runtime.autotuner import Autotuner, Config
-from triton.runtime.jit import compute_cache_key
+from triton.runtime.jit import MockTensor, compute_cache_key
 from triton.backends.ascend.utils import (_InternalNPUOptionInt, _remove_deprecated_npu_options,
                                           _RESERVED_NPU_OPTION_NAMES, is_compile_on_910_95, _multibuffer_mode_to_tuple)
 
@@ -317,10 +317,32 @@ def _expand_configs_with_hints(fn, configs, config_hints: Dict[str, object]):
     return expanded_configs
 
 
+_PRINT_AUTOTUNING_UNSET = object()
+
+
 class AutoTilingTuner(Autotuner):
     """
     Automatic generateing candidate tiling configs and evaluating their performance to get the best config.
     """
+
+    @property
+    def print_autotuning(self) -> bool:
+        """Whether autotuning diagnostics are printed.
+
+        Read from ``knobs.autotuning.print`` on every access so the knob
+        behaves like upstream: it can be set after the decorator is applied,
+        can be scoped, and accepts any truthy environment value. An explicit
+        assignment to this attribute still wins, which preserves the legacy
+        instance-level override.
+        """
+        override = self.__dict__.get("_print_autotuning_override", _PRINT_AUTOTUNING_UNSET)
+        if override is not _PRINT_AUTOTUNING_UNSET:
+            return override
+        return knobs.autotuning.print
+
+    @print_autotuning.setter
+    def print_autotuning(self, value: bool) -> None:
+        self.__dict__["_print_autotuning_override"] = bool(value)
 
     def __init__(
         self,
@@ -410,13 +432,12 @@ class AutoTilingTuner(Autotuner):
         self.user_specified_multibuffer = None
         target_arch = triton.runtime.driver.active.get_current_target().arch
         self.default_multibuffer = not is_compile_on_910_95(target_arch)
-        self.print_autotuning = os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1"
 
         # Mark the original function so ubtuner can detect autotune was applied
         ori_fn = get_origin_fn(fn)
         setattr(ori_fn, '_triton_autotuned', True)
 
-        self.enable_ubtuner = os.getenv("TRITON_ENABLE_UBTUNER", "").lower() in ('compile', 'run') or getattr(
+        self.enable_ubtuner = knobs.ascend.enable_ubtuner.lower() in ('compile', 'run') or getattr(
             ori_fn, '_ubtuned', False)
         if self.enable_ubtuner:
             self.ubtuner = UBTuner(fn, key)
@@ -424,7 +445,7 @@ class AutoTilingTuner(Autotuner):
         # Compile kernels in parallel by default for triton.runtime.JITFunction or UBTuner,
         # but not for others, e.g., LibEntry, since it's not compatible with AsyncCompileMode
         self.compile_parallel = (isinstance(self.fn, (triton.runtime.JITFunction, UBTuner))
-                                 and os.getenv("TRITON_AUTOTUNE_PARALLEL_COMPILE", "1") == "1")
+                                 and knobs.ascend.autotune_parallel_compile)
         self._source_module_ast_cache: Optional[ast.Module] = None
         self._source_module_ast_resolved = False
 
@@ -2448,7 +2469,7 @@ class AutoTilingTuner(Autotuner):
             jit_key = compute_cache_key(kernel_key_cache, specialization, options)
 
             env_vars = get_cache_invalidating_env_vars()
-            ubtuner_mode = os.environ.get("TRITON_ENABLE_UBTUNER", "")
+            ubtuner_mode = knobs.ascend.enable_ubtuner
             if ubtuner_mode:
                 env_vars["TRITON_ENABLE_UBTUNER"] = ubtuner_mode
 
@@ -2607,7 +2628,7 @@ class AutoTilingTuner(Autotuner):
         if parser_mode in ("cube", "mix") and cv_parse_result is not None:
             run_fns = self._prune_by_time_limit(run_fns)
 
-        use_profiling = os.getenv("TRITON_BENCH_METHOD", "default").lower() == "npu"
+        use_profiling = knobs.ascend.bench_method.lower() == "npu"
         # Respect user-provided benchmarkers even when NPU profiling mode is enabled.
         use_npu_profiling = use_profiling and not self.user_defined_do_bench
         if use_npu_profiling:
@@ -2698,6 +2719,11 @@ class AutoTilingTuner(Autotuner):
         return kernel_call
 
     def warmup(self, *args, **kwargs):
+        # Upstream KernelInterface.warmup accepts torch.dtype placeholders and wraps
+        # them in MockTensor before reading argument types. Ascend inspects the args
+        # in generate_key_and_configs (which requires a dtype for tile generation)
+        # before reaching that layer, so restore the upstream contract here.
+        args = tuple(map(MockTensor.wrap_dtype, args))
         kwargs = _remove_deprecated_npu_options(kwargs)
         self._inject_grid_num_tiles(kwargs)
         _ = self.generate_key_and_configs(*args, **kwargs)
