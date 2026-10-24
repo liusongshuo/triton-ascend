@@ -109,10 +109,23 @@ def _extend_cache_invalidating_env_vars(module: ModuleType, keys: Iterable[str])
 
     def _patched(original=original, keys=tuple(keys)):
         env_vars = original()
+        fields = {knob.key: name for name, knob in _knobs.ascend.knob_descriptors.items()}
         for key in keys:
-            value = os.environ.get(key)
-            if value is not None:
-                env_vars[key] = value
+            env_vars.pop(key, None)
+            field = fields.get(key)
+            if field is None:
+                value = os.environ.get(key)
+                if value is not None:
+                    env_vars[key] = value
+                continue
+            knob = _knobs.ascend.knob_descriptors[field]
+            current = getattr(_knobs.ascend, field)
+            if current == getattr(knob, "default", None):
+                continue
+            token = _knobs.toenv(current)
+            if token is None or token[0] is None:
+                continue
+            env_vars[key] = token[0]
         return env_vars
 
     _patched._ascend_extended = True

@@ -369,20 +369,89 @@ def test_ascend_cache_invalidating_env_vars(monkeypatch):
         "TRITON_ENABLE_UBTUNER": "run",
         "TRITON_BENCH_METHOD": "npu",
     }
+    # Bool knobs are stored in the canonical form written by assignment ("1"),
+    # so "true" and "1" share one cache entry.
+    expected = dict(values)
+    expected["ENABLE_PRINT_UB_BITS"] = "1"
     for key, value in values.items():
         monkeypatch.setenv(key, value)
 
     for module in (jit_module, compiler_module):
         env_vars = module.get_cache_invalidating_env_vars()
         for key in _COMPILE_ENV_KEYS:
-            assert env_vars[key] == values[key], (module.__name__, key)
+            assert env_vars[key] == expected[key], (module.__name__, key)
         assert "TRITON_BENCH_METHOD" not in env_vars
 
     # Autotuners additionally hash the benchmark method.
     for module in (upstream_autotuner, ascend_autotuner):
         env_vars = module.get_cache_invalidating_env_vars()
         for key in _COMPILE_ENV_KEYS + _AUTOTUNE_ENV_KEYS:
-            assert env_vars[key] == values[key], (module.__name__, key)
+            assert env_vars[key] == expected[key], (module.__name__, key)
+
+
+def test_ascend_cache_key_follows_effective_knob(monkeypatch):
+    """A knob override changes the cache key even when it does not write the environment."""
+    import triton.compiler.compiler as compiler_module
+    import triton.runtime.jit as jit_module
+    import triton.runtime.autotuner as upstream_autotuner
+
+    for key in ("TRITON_ENABLE_SANITIZER", "TRITON_BENCH_METHOD", "NPU_DEVICE_LIMIT"):
+        monkeypatch.delenv(key, raising=False)
+
+    triton.knobs.propagate_env = False
+    try:
+        triton.knobs.ascend.enable_sanitizer = True
+        triton.knobs.ascend.bench_method = "npu"
+        assert os.environ.get("TRITON_ENABLE_SANITIZER") is None
+        assert os.environ.get("TRITON_BENCH_METHOD") is None
+
+        compile_vars = compiler_module.get_cache_invalidating_env_vars()
+        assert compile_vars["TRITON_ENABLE_SANITIZER"] == "1"
+        assert "TRITON_BENCH_METHOD" not in compile_vars
+        assert "NPU_DEVICE_LIMIT" not in compile_vars
+        assert jit_module.get_cache_invalidating_env_vars()["TRITON_ENABLE_SANITIZER"] == "1"
+
+        autotune_vars = upstream_autotuner.get_cache_invalidating_env_vars()
+        assert autotune_vars["TRITON_ENABLE_SANITIZER"] == "1"
+        assert autotune_vars["TRITON_BENCH_METHOD"] == "npu"
+
+        # The instance value wins over a conflicting environment variable.
+        monkeypatch.setenv("TRITON_ENABLE_SANITIZER", "0")
+        assert compiler_module.get_cache_invalidating_env_vars()["TRITON_ENABLE_SANITIZER"] == "1"
+
+        # NPU_DEVICE_LIMIT is not a knob and still comes from the environment.
+        monkeypatch.setenv("NPU_DEVICE_LIMIT", "cube,vector")
+        assert compiler_module.get_cache_invalidating_env_vars()["NPU_DEVICE_LIMIT"] == "cube,vector"
+    finally:
+        triton.knobs.ascend.enable_sanitizer = triton.knobs.env
+        triton.knobs.ascend.bench_method = triton.knobs.env
+        triton.knobs.propagate_env = True
+
+
+def test_effective_knob_misses_shared_compile_cache(fresh_knobs):
+    """propagate_env=False must not reuse a binary compiled under another knob value."""
+    knobs = fresh_knobs.ascend
+    triton.knobs.propagate_env = False
+    cache_dir = _fresh_cache_dir("knob-effective-cache-")
+    try:
+        assert os.environ.get("TRITON_ENABLE_SANITIZER") is None
+        with triton.knobs.cache.scope():
+            triton.knobs.cache.dir = cache_dir
+            _clear_in_process_cache()
+            disabled = _add_kernel.warmup(torch.float32, torch.float32, torch.float32, 1024, BLOCK=256, grid=(4, ))
+
+        knobs.enable_sanitizer = True
+        assert os.environ.get("TRITON_ENABLE_SANITIZER") is None
+        with triton.knobs.cache.scope():
+            triton.knobs.cache.dir = cache_dir
+            _clear_in_process_cache()
+            enabled = _add_kernel.warmup(torch.float32, torch.float32, torch.float32, 1024, BLOCK=256, grid=(4, ))
+
+        assert enabled.metadata.hash != disabled.metadata.hash
+        assert enabled.asm["npubin"] != disabled.asm["npubin"]
+    finally:
+        _clear_in_process_cache()
+        shutil.rmtree(cache_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
