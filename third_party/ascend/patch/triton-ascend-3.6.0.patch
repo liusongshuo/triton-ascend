@@ -735,7 +735,7 @@ index d4872a463..86348211d 100644
 -        # If TRITON_STORE_BINARY_ONLY is 1, only store cubin/hsaco/json
 -        if (not store_only_binary) or (ext in ("cubin", "hsaco", "json")):
 +        # If TRITON_STORE_BINARY_ONLY is 1, only store the final binary.
-+        if (not store_only_binary) or (ext in ("cubin", "hsaco", "json", backend.binary_ext)):
++        if (not store_only_binary) or (ext in (backend.binary_ext, "json")):
              metadata_group[ir_filename] = fn_cache_manager.put(next_module, ir_filename)
          if fn_dump_manager is not None:
              fn_dump_manager.put(next_module, ir_filename)

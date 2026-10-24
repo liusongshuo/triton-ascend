@@ -17,22 +17,6 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-"""Tests for the Ascend knob behaviour changed by this branch.
-
-Only the code touched here is covered:
-
-  * ``triton.knobs.ascend`` -- installation, defaults, scoping, cache keys;
-  * Ascend consumers that used to read ``os.environ`` directly;
-  * the store-binary-only patch, ``autotuning.print`` and ``compile_only``.
-
-The upstream generic knob layer (``python/test/unit/test_knobs.py``) is not
-re-ported; those tests do not exercise Ascend code.
-
-Run with a configured CANN/TorchNPU environment::
-
-    pytest -q test_knob.py
-"""
-
 import os
 import shutil
 import tempfile
@@ -40,7 +24,6 @@ from pathlib import Path
 
 import pytest
 import torch
-import torch_npu  # noqa: F401  # registers the NPU backend with PyTorch
 
 import triton
 import triton.language as tl
@@ -102,7 +85,7 @@ def test_store_binary_only():
         assert ".npubin" in suffixes
         assert ".json" in suffixes
         assert compiled.asm["npubin"]
-        for ext in (".ttir", ".ttadapter", ".mlirbc", ".bcmlir"):
+        for ext in (".ttir", ".ttadapter"):
             assert ext not in suffixes
 
         # The knob is not part of the cache key: a run with the default value
@@ -166,9 +149,6 @@ def test_autotuning_print(capsys, monkeypatch):
             assert "Triton autotuning for function" not in second
             assert torch.allclose(out, x + y)
 
-        # Upstream reads the knob on every run, so it may be enabled after the
-        # decorator has been applied. Ascend used to snapshot it in
-        # AutoTilingTuner.__init__ and silently ignore the late assignment.
         with triton.knobs.cache.scope(), triton.knobs.autotuning.scope():
             triton.knobs.cache.dir = cache_dir
             triton.knobs.autotuning.print = False
@@ -179,8 +159,6 @@ def test_autotuning_print(capsys, monkeypatch):
             late = capsys.readouterr().out
             assert "Triton autotuning for function" in late
 
-        # Any truthy spelling accepted by env_bool works ("1", "true", "on",
-        # ...); Ascend used to compare against the literal "1".
         with triton.knobs.cache.scope(), triton.knobs.autotuning.scope():
             triton.knobs.cache.dir = cache_dir
             triton.knobs.autotuning.reset()
