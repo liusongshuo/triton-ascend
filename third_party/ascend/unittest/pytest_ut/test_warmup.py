@@ -17,24 +17,10 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-"""Tests for the autotuned warmup path changed by this branch.
-
-``AutoTilingTuner.warmup`` now wraps ``torch.dtype`` placeholders in
-``MockTensor`` before generating the key/tile configs, restoring the upstream
-``KernelInterface.warmup`` contract.  These cases cover that path; the generic
-JIT warmup semantics are already covered upstream by
-``python/test/unit/runtime/test_cache.py``.
-
-Run with a configured CANN/TorchNPU environment::
-
-    pytest -q test_warmup.py
-"""
-
 import tempfile
 
 import pytest
 import torch
-import torch_npu  # noqa: F401  # registers the NPU backend with PyTorch
 
 import triton
 import triton.language as tl

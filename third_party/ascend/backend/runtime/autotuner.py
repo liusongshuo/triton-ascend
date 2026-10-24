@@ -2697,10 +2697,7 @@ class AutoTilingTuner(Autotuner):
         return kernel_call
 
     def warmup(self, *args, **kwargs):
-        # Upstream KernelInterface.warmup accepts torch.dtype placeholders and wraps
-        # them in MockTensor before reading argument types. Ascend inspects the args
-        # in generate_key_and_configs (which requires a dtype for tile generation)
-        # before reaching that layer, so restore the upstream contract here.
+        # refer to triton.runtime.jit.KernelInterface.warmup, and wrap args with MockTensor.wrap_dtype
         args = tuple(map(MockTensor.wrap_dtype, args))
         kwargs = _remove_deprecated_npu_options(kwargs)
         self._inject_grid_num_tiles(kwargs)
