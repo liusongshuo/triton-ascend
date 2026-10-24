@@ -346,15 +346,23 @@ def test_ascend_knob_consumers(fresh_knobs):
     assert utils._is_ascend_sanitizer_enabled()
 
 
-def test_ascend_cache_invalidating_env_vars(monkeypatch):
-    """T35: compile/autotune-affecting Ascend env vars enter the cache key."""
+def _cache_key_modules():
     import triton.compiler.compiler as compiler_module
     import triton.runtime.autotuner as upstream_autotuner
     import triton.runtime.jit as jit_module
     import triton.backends.ascend.runtime.autotuner as ascend_autotuner
 
-    modules = (jit_module, compiler_module, upstream_autotuner, ascend_autotuner)
-    for module in modules:
+    return jit_module, compiler_module, upstream_autotuner, ascend_autotuner
+
+
+_ASCEND_KEY_NAMES = set(_COMPILE_ENV_KEYS) | set(_AUTOTUNE_ENV_KEYS)
+
+
+def test_ascend_cache_invalidating_env_vars(fresh_knobs, monkeypatch):
+    """T35: compile/autotune-affecting Ascend knobs enter the cache key."""
+    jit_module, compiler_module, upstream_autotuner, ascend_autotuner = _cache_key_modules()
+
+    for module in _cache_key_modules():
         assert getattr(module.get_cache_invalidating_env_vars, "_ascend_extended", False)
 
     for key in _COMPILE_ENV_KEYS + ("TRITON_BENCH_METHOD", ):
@@ -369,20 +377,111 @@ def test_ascend_cache_invalidating_env_vars(monkeypatch):
         "TRITON_ENABLE_UBTUNER": "run",
         "TRITON_BENCH_METHOD": "npu",
     }
+    # Bool knobs are canonicalized so "1" and "true" produce the same key.
+    expected = {
+        **values,
+        "TRITON_ENABLE_SANITIZER": "true",
+        "ENABLE_PRINT_UB_BITS": "true",
+        "TRITON_MEMORY_DISPLAY": "true",
+    }
     for key, value in values.items():
         monkeypatch.setenv(key, value)
 
     for module in (jit_module, compiler_module):
         env_vars = module.get_cache_invalidating_env_vars()
         for key in _COMPILE_ENV_KEYS:
-            assert env_vars[key] == values[key], (module.__name__, key)
+            assert env_vars[key] == expected[key], (module.__name__, key)
         assert "TRITON_BENCH_METHOD" not in env_vars
 
     # Autotuners additionally hash the benchmark method.
     for module in (upstream_autotuner, ascend_autotuner):
         env_vars = module.get_cache_invalidating_env_vars()
         for key in _COMPILE_ENV_KEYS + _AUTOTUNE_ENV_KEYS:
-            assert env_vars[key] == values[key], (module.__name__, key)
+            assert env_vars[key] == expected[key], (module.__name__, key)
+
+
+def test_ascend_cache_key_default_state(fresh_knobs, monkeypatch):
+    """T39: unset knobs and environment keep the historical cache key."""
+    monkeypatch.delenv("NPU_DEVICE_LIMIT", raising=False)
+    for module in _cache_key_modules():
+        env_vars = module.get_cache_invalidating_env_vars()
+        assert not (_ASCEND_KEY_NAMES & env_vars.keys()), module.__name__
+
+
+def test_ascend_cache_key_follows_knob_override(fresh_knobs):
+    """T40: propagate_env=False assignments still change the cache key.
+
+    Compilation reads ``knobs.ascend.enable_sanitizer`` and therefore produces
+    a different artifact; the key must follow the same effective value even
+    though ``os.environ`` is untouched.
+    """
+    jit_module, compiler_module, _, _ = _cache_key_modules()
+    knobs = fresh_knobs.ascend
+    fresh_knobs.propagate_env = False
+
+    for module in (jit_module, compiler_module):
+        assert "TRITON_ENABLE_SANITIZER" not in module.get_cache_invalidating_env_vars()
+
+    knobs.enable_sanitizer = True
+    assert "TRITON_ENABLE_SANITIZER" not in os.environ
+    for module in (jit_module, compiler_module):
+        assert module.get_cache_invalidating_env_vars()["TRITON_ENABLE_SANITIZER"] == "true"
+
+    knobs.enable_sanitizer = False
+    for module in (jit_module, compiler_module):
+        assert module.get_cache_invalidating_env_vars()["TRITON_ENABLE_SANITIZER"] == "false"
+
+
+def test_ascend_cache_key_prefers_knob_override(fresh_knobs, monkeypatch):
+    """T41: the key records the value compilation actually observes."""
+    from triton.backends.ascend import utils
+
+    _, compiler_module, _, _ = _cache_key_modules()
+    knobs = fresh_knobs.ascend
+    fresh_knobs.propagate_env = False
+    monkeypatch.setenv("TRITON_ENABLE_SANITIZER", "0")
+
+    knobs.enable_sanitizer = True
+    assert os.environ["TRITON_ENABLE_SANITIZER"] == "0"
+    assert utils._is_ascend_sanitizer_enabled()
+    assert compiler_module.get_cache_invalidating_env_vars()["TRITON_ENABLE_SANITIZER"] == "true"
+
+
+def test_ascend_cache_key_env_only_knobs(fresh_knobs, monkeypatch):
+    """T42: configuration without a knob stays read from the environment."""
+    _, compiler_module, _, _ = _cache_key_modules()
+
+    monkeypatch.setenv("NPU_DEVICE_LIMIT", "cube,vector")
+    assert compiler_module.get_cache_invalidating_env_vars()["NPU_DEVICE_LIMIT"] == "cube,vector"
+
+    # Upstream treats an empty value as unset; do the same.
+    monkeypatch.setenv("NPU_DEVICE_LIMIT", "")
+    assert "NPU_DEVICE_LIMIT" not in compiler_module.get_cache_invalidating_env_vars()
+
+
+def test_ascend_cache_key_autotune_group(fresh_knobs):
+    """T43: autotune caches follow the knobs they consume, and only those."""
+    jit_module, compiler_module, upstream_autotuner, ascend_autotuner = _cache_key_modules()
+    knobs = fresh_knobs.ascend
+    fresh_knobs.propagate_env = False
+
+    knobs.bench_method = "npu"
+    assert "TRITON_BENCH_METHOD" not in os.environ
+    for module in (jit_module, compiler_module):
+        assert "TRITON_BENCH_METHOD" not in module.get_cache_invalidating_env_vars()
+    for module in (upstream_autotuner, ascend_autotuner):
+        assert module.get_cache_invalidating_env_vars()["TRITON_BENCH_METHOD"] == "npu"
+
+
+def test_ascend_cache_key_scope_restore(fresh_knobs):
+    """T44: a scoped knob only affects keys produced inside the scope."""
+    _, compiler_module, _, _ = _cache_key_modules()
+    knobs = fresh_knobs.ascend
+
+    with knobs.scope():
+        knobs.print_ub_bits = True
+        assert compiler_module.get_cache_invalidating_env_vars()["ENABLE_PRINT_UB_BITS"] == "true"
+    assert "ENABLE_PRINT_UB_BITS" not in compiler_module.get_cache_invalidating_env_vars()
 
 
 # ---------------------------------------------------------------------------
@@ -540,3 +639,67 @@ def test_ascend_compile_only_skips_launch(fresh_knobs, monkeypatch):
     launcher, launched = make_launcher(False)
     assert not launcher.compile_only
     assert len(launched) == 1
+
+
+def test_ascend_cache_key_shared_cache_dir(fresh_knobs, monkeypatch, tmp_path):
+    """T45: propagate_env=False changes never reuse artifacts from a shared cache.
+
+    Compilation under a different sanitizer setting produces a different
+    artifact, so toggling the knob without touching ``os.environ`` must still
+    miss the on-disk cache entry created by the previous configuration.
+    """
+    knobs = fresh_knobs.ascend
+    fresh_knobs.propagate_env = False
+    monkeypatch.delenv("TRITON_ENABLE_SANITIZER", raising=False)
+    cache_dir = str(tmp_path)
+
+    def compile_add():
+        _clear_in_process_cache()
+        try:
+            with triton.knobs.cache.scope():
+                triton.knobs.cache.dir = cache_dir
+                return _add_kernel.warmup(torch.float32, torch.float32, torch.float32, 1024, BLOCK=256, grid=(4, ))
+        finally:
+            _clear_in_process_cache()
+
+    baseline = compile_add()
+    knobs.enable_sanitizer = True
+    assert "TRITON_ENABLE_SANITIZER" not in os.environ
+    enabled = compile_add()
+
+    # A cache hit would have returned the baseline metadata; two distinct
+    # hashes therefore mean the second configuration compiled its own artifact.
+    assert len({baseline.metadata.hash, enabled.metadata.hash}) == 2
+    assert enabled.asm["npubin"] != baseline.asm["npubin"]
+
+
+def test_ascend_autotune_cache_key_follows_bench_method(fresh_knobs, monkeypatch):
+    """T46: the autotune disk key follows bench_method without env writes."""
+    import triton.runtime.autotuner as upstream_autotuner
+    from triton.backends.ascend.runtime.autotuner import AutoTilingTuner
+
+    knobs = fresh_knobs.ascend
+    fresh_knobs.propagate_env = False
+
+    class FakeCache:
+
+        def get_file(self, name):
+            return None
+
+        def put(self, data, name, binary=False):
+            pass
+
+    keys = []
+    monkeypatch.setattr(upstream_autotuner, "get_cache_manager", lambda key: keys.append(key) or FakeCache())
+
+    tuner = AutoTilingTuner(_add_kernel, _add_kernel.arg_names, [], ["n"], [], [])
+    config = triton.Config({"BLOCK": 128})
+
+    def disk_key():
+        tuner.check_disk_cache(("n", ), [config], lambda: setattr(tuner, "configs_timings", {config: 1.0}))
+        return keys[-1]
+
+    baseline = disk_key()
+    knobs.bench_method = "npu"
+    assert "TRITON_BENCH_METHOD" not in os.environ
+    assert disk_key() != baseline

@@ -2447,9 +2447,6 @@ class AutoTilingTuner(Autotuner):
             jit_key = compute_cache_key(kernel_key_cache, specialization, options)
 
             env_vars = get_cache_invalidating_env_vars()
-            ubtuner_mode = knobs.ascend.enable_ubtuner
-            if ubtuner_mode:
-                env_vars["TRITON_ENABLE_UBTUNER"] = ubtuner_mode
 
             return (
                 jit_fn.cache_key,

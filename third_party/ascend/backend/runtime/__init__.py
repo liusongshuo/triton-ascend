@@ -18,8 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from triton import knobs
-
 from .autotuner import get_max_configs, max_autotune
 
 
@@ -65,31 +63,8 @@ def _patch_config_init():
     Config.__init__ = _patched_config_init
 
 
-def _patch_cache_invalidating_env_vars():
-    """Include TRITON_ENABLE_UBTUNER in the autotune disk cache key.
-
-    UB-tuner may rescue configs that would otherwise fail to compile, changing
-    the benchmark outcome. Toggling it must therefore invalidate cached
-    autotune results; otherwise a cache hit from a run without UB-tuner would
-    silently skip configs that UB-tuner could have rescued.
-    """
-    import triton.runtime.autotuner as _autotuner_module
-
-    _original_get_env_vars = _autotuner_module.get_cache_invalidating_env_vars
-
-    def _patched_get_env_vars():
-        env_vars = _original_get_env_vars()
-        ubtuner_mode = knobs.ascend.enable_ubtuner
-        if ubtuner_mode:
-            env_vars["TRITON_ENABLE_UBTUNER"] = ubtuner_mode
-        return env_vars
-
-    _autotuner_module.get_cache_invalidating_env_vars = _patched_get_env_vars
-
-
 _patch_autotune()
 _patch_config_init()
-_patch_cache_invalidating_env_vars()
 
 # ``triton.backends.ascend.runtime.autotuner`` was imported above, after the
 # backend-level install ran; hook its cache-key binding now as well.
