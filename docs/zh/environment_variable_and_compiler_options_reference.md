@@ -2,6 +2,8 @@
 
 本文面向Triton-Ascend算子开发者，提供编译、运行、调试和自动调优配置的查阅入口，说明各配置项的用途、默认值及A2/A3、950支持情况。环境变量用于设置进程内的编译与运行行为，编译选项用于配置单个kernel。旧配置的迁移方式集中在文末的[编译选项清理与兼容性](#compiler-option-cleanup-and-compatibility)。
 
+其中部分 Ascend 环境变量已经提供类型化的 `triton.knobs.ascend` 接口，可以在进程内读写并支持作用域恢复，用法见下文「triton.knobs.ascend 接口」一节。
+
 ## 环境变量
 
 ### 环境变量用法示例
@@ -60,6 +62,49 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 工具链选择 | `CC` | 设置CPU launcher扩展的C/C++编译器。 | 未设置，使用系统默认编译器 | 支持 | 支持 |
 | 工具链选择 | `TRITON_NPU_COMPILER_PATH` | 仅当随包工具与 `PATH` 查找均失败时，作为Ascend编译器工具目录的后备路径。 | 未设置 | 支持 | 支持 |
 | 工具链选择 | `TRITON_BUILD_DIR` | 查找 `triton-opt`、`triton-mlir-opt` 时，在随包工具之后、`PATH` 之前查找该目录的 `bin/`。 | 未设置 | 支持 | 支持 |
+
+## triton.knobs.ascend 接口
+
+`triton.knobs` 是 Triton 3.6 引入的类型化配置接口。Triton-Ascend 增加了 `triton.knobs.ascend` 分组，把部分 Ascend 环境变量包装成字段。字段名是 Python 风格，环境变量名保持不变，已有脚本可以继续使用环境变量。导入 Ascend 后端时会自动安装该分组：
+
+```python
+import triton
+import triton.backends.ascend.runtime
+
+print(triton.knobs.ascend.knobs)
+```
+
+### 读写语义
+
+- 读取：优先返回进程内值，其次环境变量，最后默认值。
+- 赋值：写入进程内值，并默认同步写回环境变量。
+- `scope()`：记录进入时的进程内值和环境变量，退出时（包括异常）完整恢复，推荐用于临时切换。
+- `reset()` / `knobs.env`：只清除进程内覆盖，不撤销已经写入的环境变量。
+- `copy()`：复制当前进程内覆盖，返回独立的分组对象。
+- `propagate_env = False`：赋值只影响当前 Python 进程；子进程和直接读取 `os.getenv` 的工具看不到，确认没有外部读取方时再使用。
+
+```python
+with triton.knobs.ascend.scope():
+    triton.knobs.ascend.device_print = True
+    kernel[grid](x, y, out)
+# 退出 with 块后恢复
+```
+
+### 字段参考
+
+| 字段 | 环境变量 | 默认值 | 说明 |
+|------|----------|--------|------|
+| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | 向 Ascend NPU 编译器传入 sanitizer 开关。 |
+| `print_ub_bits` | `ENABLE_PRINT_UB_BITS` | `False` | 请求编译器打印 UB 占用位数。 |
+| `memory_display` | `TRITON_MEMORY_DISPLAY` | `False` | 请求编译器输出内存使用信息。 |
+| `npu_compiler_path` | `TRITON_NPU_COMPILER_PATH` | `None` | 仅当随包工具与 `PATH` 查找均失败时，作为 Ascend 编译器工具目录的后备路径。 |
+| `enable_ubtuner` | `TRITON_ENABLE_UBTUNER` | `""` | 选择 UB 调优模式：`compile` 或 `run`。 |
+| `autotune_parallel_compile` | `TRITON_AUTOTUNE_PARALLEL_COMPILE` | `True` | 控制 Ascend autotune 的并行编译。 |
+| `bench_method` | `TRITON_BENCH_METHOD` | `"default"` | 设为 `"npu"` 时选择 Ascend 的 `do_bench_npu`；`default` 使用通用测量方法。 |
+| `compile_only` | `TRITON_COMPILE_ONLY` | `False` | 不启动 kernel；编译及 launcher 扩展加载仍会执行。 |
+| `enable_taskqueue` | `TRITON_ENABLE_TASKQUEUE` | `True` | 控制 Ascend launcher 的 task queue。 |
+| `device_print` | `TRITON_DEVICE_PRINT` | `False` | 启用 `tl.device_print` 的设备端 GM 打印缓冲区。 |
+| `grid_warn_print` | `TRITON_GRID_WARN_PRINT` | `False` | 打印 Ascend launcher 的 grid 大小警告。 |
 
 ## 编译选项
 

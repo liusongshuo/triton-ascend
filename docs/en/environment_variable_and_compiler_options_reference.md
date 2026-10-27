@@ -2,6 +2,8 @@
 
 This page is a configuration reference for Triton-Ascend kernel developers. It lists settings for compilation, execution, debugging, and autotuning, with their purpose, defaults, and support on A2/A3 and 950. Environment variables configure compilation and runtime behavior within a process; compiler options configure individual kernels. Migration advice for existing configurations appears under [Compiler Option Cleanup and Compatibility](#compiler-option-cleanup-and-compatibility).
 
+Some Ascend environment variables now have a typed `triton.knobs.ascend` interface, which can be read and written in-process and supports scoped restoration. See the "triton.knobs.ascend Interface" section below.
+
 ## Environment Variables
 
 ### Environment Variable Usage Example
@@ -60,6 +62,49 @@ The 950 column covers Ascend 950PR/950DT; "—" means not applicable. Compilatio
 | Toolchain selection | `CC` | Sets the C/C++ compiler for the CPU launcher extension. | Unset; system default compiler | Yes | Yes |
 | Toolchain selection | `TRITON_NPU_COMPILER_PATH` | Supplies a fallback NPU compiler tool directory when packaged tools and `PATH` lookup fail. | Unset | Yes | Yes |
 | Toolchain selection | `TRITON_BUILD_DIR` | Searches this directory's `bin/` for `triton-opt` and `triton-mlir-opt`, after packaged tools and before `PATH`. | Unset | Yes | Yes |
+
+## triton.knobs.ascend Interface
+
+`triton.knobs` is the typed configuration interface introduced in Triton 3.6. Triton-Ascend adds the `triton.knobs.ascend` group, wrapping some Ascend environment variables as fields. Field names use Python style, environment variable names are unchanged, and existing scripts can keep using environment variables. The group is installed automatically when the Ascend backend is imported:
+
+```python
+import triton
+import triton.backends.ascend.runtime
+
+print(triton.knobs.ascend.knobs)
+```
+
+### Read and write semantics
+
+- Read: returns the in-process value first, then the environment variable, then the default.
+- Assign: stores an in-process value and, by default, writes the environment variable too.
+- `scope()`: records the in-process values and environment variables on entry and restores both on exit, including on exceptions. This is the recommended way to switch settings temporarily.
+- `reset()` / `knobs.env`: clears in-process overrides only; environment variables already written are not restored.
+- `copy()`: copies the current in-process overrides and returns an independent group object.
+- `propagate_env = False`: assignment affects the current Python process only; subprocesses and tools that call `os.getenv` directly cannot see it. Use it only when no external reader depends on the variable.
+
+```python
+with triton.knobs.ascend.scope():
+    triton.knobs.ascend.device_print = True
+    kernel[grid](x, y, out)
+# Restored after leaving the block
+```
+
+### Field reference
+
+| Field | Environment variable | Default | Description |
+|-------|----------------------|---------|-------------|
+| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | Passes the sanitizer switch to the Ascend NPU compiler. |
+| `print_ub_bits` | `ENABLE_PRINT_UB_BITS` | `False` | Requests the number of occupied UB bits from the compiler. |
+| `memory_display` | `TRITON_MEMORY_DISPLAY` | `False` | Requests compiler memory-usage output. |
+| `npu_compiler_path` | `TRITON_NPU_COMPILER_PATH` | `None` | Fallback NPU compiler tool directory used when packaged tools and `PATH` lookup fail. |
+| `enable_ubtuner` | `TRITON_ENABLE_UBTUNER` | `""` | Selects the UB tuning mode, `compile` or `run`. |
+| `autotune_parallel_compile` | `TRITON_AUTOTUNE_PARALLEL_COMPILE` | `True` | Controls parallel compilation in Ascend autotune. |
+| `bench_method` | `TRITON_BENCH_METHOD` | `"default"` | `npu` selects Ascend's `do_bench_npu`; `default` uses the shared benchmark path. |
+| `compile_only` | `TRITON_COMPILE_ONLY` | `False` | Skips kernel launches; compilation and launcher extension loading still run. |
+| `enable_taskqueue` | `TRITON_ENABLE_TASKQUEUE` | `True` | Controls the Ascend launcher's task queue. |
+| `device_print` | `TRITON_DEVICE_PRINT` | `False` | Enables the device GM buffer used by `tl.device_print`. |
+| `grid_warn_print` | `TRITON_GRID_WARN_PRINT` | `False` | Prints Ascend launcher warnings about grid size. |
 
 ## Compiler Options
 
