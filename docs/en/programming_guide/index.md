@@ -10,7 +10,7 @@ This guide separates common development rules, operator-specific development pat
 - [Vector Operator Development](./vector_operator.md) describes element-wise, reduction, gather/scatter, and other operators mainly executed on Vector Cores.
 - [Cube Operator Development](./cube_operator.md) describes operators whose main computation is `tl.dot`, matrix multiplication, or batched matrix multiplication.
 - [CV Fusion Operator Development](./cv_fusion_operator.md) describes operators that combine Cube computation with Vector post-processing, reductions, softmax, or cross-core coordination.
-- [Operator Warmup](./warmup_guide.md) describes how to compile plain JIT and autotune kernels ahead of execution.
+- [Warmup User Guide](./warmup_guide.md) describes how to compile plain JIT and autotune kernels ahead of execution.
 
 For simple operators, refer to this repository's `docs/en/examples/` and `third_party/ascend/tutorials/`. For complex operators, refer to complete optimization cases in `tutorial/best_practice/` of [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops).
 

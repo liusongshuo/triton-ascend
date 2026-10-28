@@ -65,11 +65,11 @@ TRITON_DEBUG=1 python3 run_kernel.py
 
 ## triton.knobs.ascend 接口
 
-`triton.knobs` 是 Triton 3.6 引入的类型化配置接口。Triton-Ascend 增加了 `triton.knobs.ascend` 分组，把部分 Ascend 环境变量包装成字段。字段名是 Python 风格，环境变量名保持不变，已有脚本可以继续使用环境变量。导入 Ascend 后端时会自动安装该分组：
+`triton.knobs` 是社区 Triton 3.4 引入的类型化配置接口，Triton-Ascend 在 Triton 3.6 增加了 `triton.knobs.ascend` 分组，把部分 Ascend 环境变量包装成可在进程内读写、支持作用域恢复的字段。导入 Ascend 后端后即可访问该分组：
 
 ```python
 import triton
-import triton.backends.ascend.runtime
+import triton.backends.ascend.runtime  # 触发 Ascend 后端注册，安装 triton.knobs.ascend
 
 print(triton.knobs.ascend.knobs)
 ```

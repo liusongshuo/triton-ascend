@@ -10,7 +10,7 @@
 - [Vector 算子开发](./vector_operator.md) 介绍主要由 Vector Core 执行的逐元素、归约、Gather/Scatter 等算子。
 - [Cube 算子开发](./cube_operator.md) 介绍以 `tl.dot`、矩阵乘、批量矩阵乘为核心的算子。
 - [CV 融合算子开发](./cv_fusion_operator.md) 介绍同一个算子中同时存在 Cube 计算和 Vector 后处理、归约、Softmax 或跨核协同的场景。
-- [算子预编译（warmup）](./warmup_guide.md) 介绍如何在不执行算子的情况下提前编译普通 JIT 和 Autotune 算子。
+- [Warmup使用指南](./warmup_guide.md) 介绍如何在不执行算子的情况下，提前编译普通 JIT 和 Autotune 算子。
 
 简单算子优先参考本仓 `docs/zh/examples/` 和 `third_party/ascend/tutorials/`；复杂算子优先参考 GitHub 上的 [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops) 中 `tutorial/best_practice/` 的完整优化案例。
 

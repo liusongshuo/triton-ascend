@@ -65,11 +65,11 @@ The 950 column covers Ascend 950PR/950DT; "—" means not applicable. Compilatio
 
 ## triton.knobs.ascend Interface
 
-`triton.knobs` is the typed configuration interface introduced in Triton 3.6. Triton-Ascend adds the `triton.knobs.ascend` group, wrapping some Ascend environment variables as fields. Field names use Python style, environment variable names are unchanged, and existing scripts can keep using environment variables. The group is installed automatically when the Ascend backend is imported:
+`triton.knobs` is the typed configuration interface introduced in upstream Triton 3.4. Triton-Ascend adds the `triton.knobs.ascend` group in Triton 3.6, wrapping some Ascend environment variables as fields that can be read and written in-process with scoped restoration. The group becomes available once the Ascend backend is imported:
 
 ```python
 import triton
-import triton.backends.ascend.runtime
+import triton.backends.ascend.runtime  # registers the Ascend backend and installs triton.knobs.ascend
 
 print(triton.knobs.ascend.knobs)
 ```

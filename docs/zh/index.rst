@@ -42,7 +42,7 @@ Triton Ascend
    :caption: 开发指南
 
    Triton-Ascend算子开发 <programming_guide/index>
-   算子预编译（warmup） <programming_guide/warmup_guide>
+   Warmup使用指南 <programming_guide/warmup_guide>
    Triton-Ascend算子迁移 <migration_guide/index>
    Triton-Ascend算子调试与调优 <debug_guide/index>
    环境变量与编译选项 <environment_variable_and_compiler_options_reference>
