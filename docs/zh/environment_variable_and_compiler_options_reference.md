@@ -2,7 +2,7 @@
 
 本文面向Triton-Ascend算子开发者，提供编译、运行、调试和自动调优配置的查阅入口，说明各配置项的用途、默认值及A2/A3、950支持情况。环境变量用于设置进程内的编译与运行行为，编译选项用于配置单个kernel。旧配置的迁移方式集中在文末的[编译选项清理与兼容性](#compiler-option-cleanup-and-compatibility)。
 
-其中部分 Ascend 环境变量已经提供类型化的 `triton.knobs.ascend` 接口，可以在进程内读写并支持作用域恢复，用法见下文「triton.knobs.ascend 接口」一节。
+`triton.knobs` 提供类型化的配置接口：上游分组可直接使用，Ascend 专用环境变量由 `triton.knobs.ascend` 包装，均可在进程内读写并支持作用域恢复。用法见下文环境变量一节的「triton.knobs 接口」。
 
 ## 环境变量
 
@@ -59,22 +59,32 @@ TRITON_DEBUG=1 python3 run_kernel.py
 | 运行 | `TRITON_ENABLE_TASKQUEUE` | 控制Ascend launcher的task queue。 | 开启 | 支持 | 支持 |
 | 运行 | `TRITON_GRID_WARN_PRINT` | 打印Ascend launcher的grid大小警告。 | 关闭 | 支持 | 支持 |
 | 运行 | `NPU_DEVICE_LIMIT` | 按 `AI Core数,Vector Core数` 限制可用核心数，例如 `14,28`；需符合设备比例。 | 未设置，使用设备值 | 支持 | 支持 |
+| 工具链选择 | `ASCEND_HOME_PATH` | CANN安装根目录，后端据此拼接毕昇编译器的参数与库路径；通常由CANN的 `set_env.sh` 设置，未设置时编译阶段报错。 | 未设置 | 支持 | 支持 |
 | 工具链选择 | `CC` | 设置CPU launcher扩展的C/C++编译器。 | 未设置，使用系统默认编译器 | 支持 | 支持 |
 | 工具链选择 | `TRITON_NPU_COMPILER_PATH` | 仅当随包工具与 `PATH` 查找均失败时，作为Ascend编译器工具目录的后备路径。 | 未设置 | 支持 | 支持 |
 | 工具链选择 | `TRITON_BUILD_DIR` | 查找 `triton-opt`、`triton-mlir-opt` 时，在随包工具之后、`PATH` 之前查找该目录的 `bin/`。 | 未设置 | 支持 | 支持 |
 
-## triton.knobs.ascend 接口
+### triton.knobs 接口
 
-`triton.knobs` 是社区 Triton 3.4 引入的类型化配置接口，Triton-Ascend 在 Triton 3.6 增加了 `triton.knobs.ascend` 分组，把部分 Ascend 环境变量包装成可在进程内读写、支持作用域恢复的字段。导入 Ascend 后端后即可访问该分组：
+`triton.knobs` 是社区 Triton 3.4 引入的类型化配置接口：每个字段对应一个环境变量。如果只需要在启动前配置一次，直接设置环境变量即可；需要在进程内读取当前取值、临时修改或按作用域恢复时，使用 `triton.knobs`。上游分组由 `triton.knobs` 直接提供；Triton-Ascend 在 Triton 3.6 增加了 `triton.knobs.ascend` 分组，导入 Ascend 后端后即可使用。
+
+#### 快速上手
 
 ```python
 import triton
 import triton.backends.ascend.runtime  # 触发 Ascend 后端注册，安装 triton.knobs.ascend
 
+# 查看一个分组的全部字段和当前取值
 print(triton.knobs.ascend.knobs)
+
+# 读取、修改某个字段
+print(triton.knobs.compilation.dump_ir)
+triton.knobs.ascend.device_print = True
 ```
 
-### 读写语义
+赋值对之后的读取生效，并默认同步写回环境变量，详见下文的读写规则。
+
+#### 读写规则
 
 - 读取：优先返回进程内值，其次环境变量，最后默认值。
 - 赋值：写入进程内值，并默认同步写回环境变量。
@@ -83,6 +93,8 @@ print(triton.knobs.ascend.knobs)
 - `copy()`：复制当前进程内覆盖，返回独立的分组对象。
 - `propagate_env = False`：赋值只影响当前 Python 进程；子进程和直接读取 `os.getenv` 的工具看不到，确认没有外部读取方时再使用。
 
+例如临时打开 `device_print`，退出 `with` 块后自动恢复：
+
 ```python
 with triton.knobs.ascend.scope():
     triton.knobs.ascend.device_print = True
@@ -90,21 +102,106 @@ with triton.knobs.ascend.scope():
 # 退出 with 块后恢复
 ```
 
-### 字段参考
+#### 分组一览
 
-| 字段 | 环境变量 | 默认值 | 说明 |
-|------|----------|--------|------|
-| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | 向 Ascend NPU 编译器传入 sanitizer 开关。 |
-| `print_ub_bits` | `ENABLE_PRINT_UB_BITS` | `False` | 请求编译器打印 UB 占用位数。 |
-| `memory_display` | `TRITON_MEMORY_DISPLAY` | `False` | 请求编译器输出内存使用信息。 |
-| `npu_compiler_path` | `TRITON_NPU_COMPILER_PATH` | `None` | 仅当随包工具与 `PATH` 查找均失败时，作为 Ascend 编译器工具目录的后备路径。 |
-| `enable_ubtuner` | `TRITON_ENABLE_UBTUNER` | `""` | 选择 UB 调优模式：`compile` 或 `run`。 |
-| `autotune_parallel_compile` | `TRITON_AUTOTUNE_PARALLEL_COMPILE` | `True` | 控制 Ascend autotune 的并行编译。 |
-| `bench_method` | `TRITON_BENCH_METHOD` | `"default"` | 设为 `"npu"` 时选择 Ascend 的 `do_bench_npu`；`default` 使用通用测量方法。 |
-| `compile_only` | `TRITON_COMPILE_ONLY` | `False` | 不启动 kernel；编译及 launcher 扩展加载仍会执行。 |
-| `enable_taskqueue` | `TRITON_ENABLE_TASKQUEUE` | `True` | 控制 Ascend launcher 的 task queue。 |
-| `device_print` | `TRITON_DEVICE_PRINT` | `False` | 启用 `tl.device_print` 的设备端 GM 打印缓冲区。 |
-| `grid_warn_print` | `TRITON_GRID_WARN_PRINT` | `False` | 打印 Ascend launcher 的 grid 大小警告。 |
+先按用途找到分组，再到下方“字段参考”查具体字段；只关心 Ascend 专用开关时直接看 `triton.knobs.ascend`。
+
+| 分组 | 用途 | Ascend 适用 |
+|------|------|-------------|
+| `triton.knobs.ascend` | Ascend 专用的编译、autotune、launcher 开关 | 支持 |
+| `triton.knobs.compilation` | 缓存覆盖、IR dump、调试信息等编译行为 | 支持 |
+| `triton.knobs.runtime` | 解释器模式与运行时开关 | 部分字段适用 |
+| `triton.knobs.cache` | 缓存目录与缓存管理器 | 支持 |
+| `triton.knobs.autotuning` | autotune 结果缓存与打印 | 支持 |
+| `triton.knobs.language` | 语言级默认值（FP32 精度等） | 支持 |
+| `triton.knobs.build` | CPU launcher 扩展的编译工具 | 仅 `cc` 适用 |
+| `triton.knobs.redis` | 远程缓存的 Redis 存储后端 | 支持 |
+| `triton.knobs.nvidia` / `.amd` / `.proton` | 其他后端专用 | 不使用 |
+
+#### 字段参考
+
+布尔字段的 Python 取值为 `True`/`False`；通过环境变量设置时写 `1`/`0`。默认值指未设置环境变量时的返回值。
+
+**`triton.knobs.ascend`**
+
+| 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
+|------|----------|--------|----------|------|
+| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | 向 Ascend NPU 编译器传入 sanitizer 开关。 |
+| `print_ub_bits` | `ENABLE_PRINT_UB_BITS` | `False` | `True` / `False` | 请求编译器打印 UB 占用位数。 |
+| `memory_display` | `TRITON_MEMORY_DISPLAY` | `False` | `True` / `False` | 请求编译器输出内存使用信息。 |
+| `npu_compiler_path` | `TRITON_NPU_COMPILER_PATH` | `None` | 目录路径 / `None` | 仅当随包工具与 `PATH` 查找均失败时，作为 Ascend 编译器工具目录的后备路径。 |
+| `enable_ubtuner` | `TRITON_ENABLE_UBTUNER` | `""` | `""`（关闭）、`"compile"`、`"run"` | 选择 UB 调优模式。 |
+| `autotune_parallel_compile` | `TRITON_AUTOTUNE_PARALLEL_COMPILE` | `True` | `True` / `False` | 控制 Ascend autotune 的并行编译。 |
+| `bench_method` | `TRITON_BENCH_METHOD` | `"default"` | `"default"`、`"npu"` | `"npu"` 时使用 Ascend 的 `do_bench_npu`，`"default"` 使用通用测量方法。 |
+| `compile_only` | `TRITON_COMPILE_ONLY` | `False` | `True` / `False` | 不启动 kernel；编译及 launcher 扩展加载仍会执行。 |
+| `enable_taskqueue` | `TRITON_ENABLE_TASKQUEUE` | `True` | `True` / `False` | 控制 Ascend launcher 的 task queue。 |
+| `device_print` | `TRITON_DEVICE_PRINT` | `False` | `True` / `False` | 启用 `tl.device_print` 的设备端 GM 打印缓冲区。 |
+| `grid_warn_print` | `TRITON_GRID_WARN_PRINT` | `False` | `True` / `False` | 打印 Ascend launcher 的 grid 大小警告。 |
+
+**`triton.knobs.compilation`**
+
+| 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
+|------|----------|--------|----------|------|
+| `override` | `TRITON_KERNEL_OVERRIDE` | `False` | `True` / `False` | 从覆盖目录读取与编译阶段同名的外部 IR/二进制。 |
+| `dump_ir` | `TRITON_KERNEL_DUMP` | `False` | `True` / `False` | 保存编译阶段产物及最终 `npubin`；只对实际发生的编译生效。 |
+| `dump_ir_extract_di_local_variables` | `LLVM_EXTRACT_DI_LOCAL_VARIABLES` | `False` | `True` / `False` | 请求毕昇编译器生成调试变量信息。 |
+| `store_binary_only` | `TRITON_STORE_BINARY_ONLY` | `False` | `True` / `False` | 只写入 `cubin`/`hsaco`/`json` 产物，不写中间 IR；Ascend 二进制扩展名为 `npubin`，不在该列表内。 |
+| `always_compile` | `TRITON_ALWAYS_COMPILE` | `False` | `True` / `False` | 忽略命中的编译缓存，强制重新编译。 |
+| `use_ir_loc` | `USE_IR_LOC` | `None` | `None`、阶段名（如 `"ttir"`）、源文件位置快照 | 以指定阶段的 IR 文件行号重建位置信息。 |
+| `enable_asan` | `TRITON_ENABLE_ASAN` | `False` | `True` / `False` | 在 LLVM 优化管线中插入 AddressSanitizer pass，供编译器调试。 |
+| `disable_line_info` | `TRITON_DISABLE_LINE_INFO` | `False` | `True` / `False` | 禁止向毕昇编译器请求行号信息。Ascend 后端直接读取该环境变量，未设置时按 `True` 处理。 |
+| `front_end_debugging` | `TRITON_FRONT_END_DEBUGGING` | `False` | `True` / `False` | 前端错误发生时保留原始 Python 异常堆栈。 |
+| `allow_non_constexpr_globals` | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | `False` | `True` / `False` | 允许 JIT 前端引用非 `constexpr` 全局变量。 |
+
+**`triton.knobs.runtime`**
+
+| 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
+|------|----------|--------|----------|------|
+| `interpret` | `TRITON_INTERPRET` | `False` | `True` / `False` | 在 CPU 解释器中执行其支持的 Triton 操作。 |
+| `override_arch` | `TRITON_OVERRIDE_ARCH` | `None` | 架构字符串 / `None` | 覆盖目标架构；Ascend 后端不读取。 |
+
+**`triton.knobs.cache`**
+
+| 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
+|------|----------|--------|----------|------|
+| `home_dir` | `TRITON_HOME` | 用户主目录 | 目录路径 | Triton 缓存、dump 和 override 目录的根位置。 |
+| `dump_dir` | `TRITON_DUMP_DIR` | `$TRITON_HOME/.triton/dump` | 目录路径 | IR dump 的输出目录。 |
+| `override_dir` | `TRITON_OVERRIDE_DIR` | `$TRITON_HOME/.triton/override` | 目录路径 | 覆盖文件目录。 |
+| `dir` | `TRITON_CACHE_DIR` | `$TRITON_HOME/.triton/cache` | 目录路径 | 编译缓存目录。 |
+| `manager_class` | `TRITON_CACHE_MANAGER` | `None` | `MODULE:CLASS` / `None` | 编译缓存管理器；远程缓存设为 `triton.runtime.cache:RemoteCacheManager`。 |
+| `remote_manager_class` | `TRITON_REMOTE_CACHE_BACKEND` | `None` | `MODULE:CLASS` / `None` | 远程缓存的存储后端，需配合远程缓存管理器使用。 |
+
+**`triton.knobs.autotuning`**
+
+| 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
+|------|----------|--------|----------|------|
+| `cache` | `TRITON_CACHE_AUTOTUNING` | `False` | `True` / `False` | 缓存 autotune 的选择结果。 |
+| `print` | `TRITON_PRINT_AUTOTUNING` | `False` | `True` / `False` | 打印 autotune 结果及常规路径的编译命令。 |
+
+**`triton.knobs.language`**
+
+| 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
+|------|----------|--------|----------|------|
+| `fp32_default` | `TRITON_F32_DEFAULT` | `None` | `None`、`"ieee"`、`"hf32"`、`"tf32"`（映射为 `hf32`） | `tl.dot` 的默认 FP32 输入精度；`None` 时使用后端默认值 `ieee`。 |
+| `default_fp_fusion` | `TRITON_DEFAULT_FP_FUSION` | `True` | `True` / `False` | 默认是否允许浮点运算融合。 |
+
+**`triton.knobs.build`**
+
+| 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
+|------|----------|--------|----------|------|
+| `cc` | `CC` | `None` | 编译器路径或名称 / `None` | CPU launcher 扩展的 C/C++ 编译器。 |
+| `cudacrt_path` | `TRITON_CUDACRT_PATH` | `None` | 目录路径 / `None` | 仅 NVIDIA 后端使用。 |
+| `cudart_path` | `TRITON_CUDART_PATH` | `None` | 目录路径 / `None` | 仅 NVIDIA 后端使用。 |
+
+**`triton.knobs.redis`**
+
+| 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
+|------|----------|--------|----------|------|
+| `key_format` | `TRITON_REDIS_KEY_FORMAT` | `"triton:{key}:{filename}"` | 含 `{key}`、`{filename}` 的格式串 | 远程缓存键格式。 |
+| `host` | `TRITON_REDIS_HOST` | `"localhost"` | 主机名或 IP | Redis 地址。 |
+| `port` | `TRITON_REDIS_PORT` | `6379` | 整数，有效端口 `1`–`65535` | Redis 端口。 |
+
+`launch_enter_hook`、`launch_exit_hook`、`kernel_load_start_hook`、`kernel_load_end_hook`、`jit_cache_hook`、`jit_post_compile_hook`、`add_stages_inspection_hook`、`compilation.listener`、`build.impl` 是可赋值的回调对象，不是环境变量字段。
 
 ## 编译选项
 

@@ -2,25 +2,19 @@
 
 ## 概述
 
-`kernel.warmup(*args, grid=...)` 只编译 kernel，不执行。编译产物写入 Triton 缓存，后续真实 launch 可以直接命中。
+`kernel.warmup(*args, grid=...)` 只编译 kernel，不执行。编译产物写入 Triton 缓存，后续真实 launch 可以直接命中，因此适合在服务启动或 CI 阶段提前承担编译开销。
 
-适用场景与好处：
+什么时候值得用 warmup：
 
-- **降低首次推理时延**：在服务启动或 CI 阶段提前承担编译开销，真实请求不再等待编译，冷启动无卡顿；
+- **降低首次推理时延**：真实请求不再等待编译，冷启动无卡顿；
 - **提前暴露编译错误**：编译问题在启动或 CI 阶段即可发现，避免推迟到运行时；
 - **只验证编译、不执行**：可不分配输出、不实际运行，仅确认 kernel 能否编译。
 
-### 使用技巧
-
-- 用 `torch.dtype` 占位符代替张量，避免为 warmup 分配设备内存（见下文示例）；
-- 在服务初始化阶段集中 warmup 所有用到的 kernel，包括 autotune 的候选配置；
-- autotune kernel 的 warmup 只编译、不选优，选优仍发生在首次真实 launch，不要把 warmup 当作"选优预热"。
-
-warmup 不会读写输入输出，也不会发现越界、数值错误、UB 溢出等运行时问题。注意不要和 `do_bench(warmup=...)` 混淆：后者是计时前实际运行若干次，`kernel.warmup()` 只编译、不执行。
+注意不要和 `do_bench(warmup=...)` 混淆：后者是计时前实际运行若干次，`kernel.warmup()` 只编译、不执行。
 
 ## 普通 JIT kernel
 
-本节介绍如何对普通 `@triton.jit` kernel 进行 warmup：在真实执行之前提前编译一次，查看返回的 `CompiledKernel`，并通过 dtype 占位符避免分配设备内存。
+以一个向量加法 kernel 为例，先用 `torch.dtype` 占位代替张量：
 
 ```python
 import torch
@@ -50,9 +44,13 @@ compiled = add_kernel.warmup(
 print(compiled.metadata)
 ```
 
-`grid` 必须显式传入；返回 `CompiledKernel`，可以读取 `metadata`、`asm` 等编译结果。
+调用时有三个要点：
 
-不想为 warmup 分配设备内存时，可以用 `torch.dtype` 代替张量（如上例所示）。占位符只保留 dtype，指针按 16 字节对齐、shape 按 `[1]` 处理。如果真实输入是切片、偏移视图等可能未对齐的指针，应传入真实张量，否则编译特化可能不同：
+- `grid` 必须显式传入；
+- `warmup()` 返回 `CompiledKernel`，可以读取 `metadata`、`asm` 等编译结果；
+- 不必为 warmup 分配设备内存：用 `torch.dtype` 占位即可（如上例）。
+
+占位符按“指针 16 字节对齐”的普通张量处理。如果真实输入是切片、偏移视图等可能未对齐的指针，应传真实张量，否则编译特化可能不同：
 
 ```python
 x = torch.randn(n, device="npu", dtype=torch.float32)
@@ -63,7 +61,7 @@ compiled = add_kernel.warmup(x, y, out, n, BLOCK_SIZE=256, grid=grid)
 
 ## Autotune kernel
 
-本节介绍如何对 `@triton.autotune` kernel 进行 warmup：每个候选配置都会被编译一次并缓存到 Triton 缓存，但 warmup **不做 benchmark、不选最优配置**——选优仍发生在第一次真实 launch。
+如果 kernel 使用了 `@triton.autotune`，warmup 会编译每个候选配置，写法与普通 kernel 相同：
 
 ```python
 import torch
@@ -99,8 +97,14 @@ handles = add_kernel_autotune.warmup(
 kernels = [h.result() if hasattr(h, "result") else h for h in handles]
 ```
 
-- 每个候选配置编译一次，返回列表；
-- Ascend 后端默认并行编译，元素可能是 `FutureKernel`；`.result()` 返回 `CompiledKernel`，可以统一按上面的写法处理；
-- warmup **不做 benchmark、不选最优配置**，选优仍发生在第一次真实 launch；
-- `configs=[]` 的自动 Tiling 同样支持；
-- 并行编译的异常会在 `warmup()` 返回前抛出。
+与普通 kernel 相比，有三点不同：
+
+- 返回的是列表，每个候选配置对应一项；Ascend 后端默认并行编译，元素可能是 `FutureKernel`，用 `.result()` 取到 `CompiledKernel` 后即可统一处理；
+- `configs=[]` 的自动 Tiling 同样支持；并行编译的异常会在 `warmup()` 返回前抛出；
+- warmup **不做 benchmark、不选最优配置**，选优仍发生在第一次真实 launch，不要把 warmup 当作“选优预热”。
+
+## 注意事项
+
+- warmup 不会读写输入输出，也不会发现越界、数值错误、UB 溢出等运行时问题；
+- warmup 的收益依赖缓存命中：真实 launch 应与 warmup 使用相同的 Triton 缓存目录（`TRITON_CACHE_DIR`）和编译选项；
+- 可以开启 `TRITON_DEBUG=1` 确认是否命中：真实 launch 命中缓存后，不会再出现该 kernel 的编译日志。

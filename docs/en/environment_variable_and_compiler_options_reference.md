@@ -2,7 +2,7 @@
 
 This page is a configuration reference for Triton-Ascend kernel developers. It lists settings for compilation, execution, debugging, and autotuning, with their purpose, defaults, and support on A2/A3 and 950. Environment variables configure compilation and runtime behavior within a process; compiler options configure individual kernels. Migration advice for existing configurations appears under [Compiler Option Cleanup and Compatibility](#compiler-option-cleanup-and-compatibility).
 
-Some Ascend environment variables now have a typed `triton.knobs.ascend` interface, which can be read and written in-process and supports scoped restoration. See the "triton.knobs.ascend Interface" section below.
+Some environment variables have a typed `triton.knobs` interface, which can be read and written in-process and supports scoped restoration. See the "triton.knobs Interface" section under Environment Variables below.
 
 ## Environment Variables
 
@@ -59,22 +59,32 @@ The 950 column covers Ascend 950PR/950DT; "—" means not applicable. Compilatio
 | Runtime | `TRITON_ENABLE_TASKQUEUE` | Controls the Ascend launcher's task queue. | On | Yes | Yes |
 | Runtime | `TRITON_GRID_WARN_PRINT` | Prints Ascend launcher warnings about grid size. | Off | Yes | Yes |
 | Runtime | `NPU_DEVICE_LIMIT` | Caps AI Core and Vector Core counts with `AIcores,VectorCores`, for example `14,28`; the device ratio must be valid. | Unset; device counts | Yes | Yes |
+| Toolchain selection | `ASCEND_HOME_PATH` | Root directory of the CANN installation, used by the backend to build BiSheng compiler arguments and library paths. Normally set by CANN's `set_env.sh`; compilation fails if it is unset. | Unset | Yes | Yes |
 | Toolchain selection | `CC` | Sets the C/C++ compiler for the CPU launcher extension. | Unset; system default compiler | Yes | Yes |
 | Toolchain selection | `TRITON_NPU_COMPILER_PATH` | Supplies a fallback NPU compiler tool directory when packaged tools and `PATH` lookup fail. | Unset | Yes | Yes |
 | Toolchain selection | `TRITON_BUILD_DIR` | Searches this directory's `bin/` for `triton-opt` and `triton-mlir-opt`, after packaged tools and before `PATH`. | Unset | Yes | Yes |
 
-## triton.knobs.ascend Interface
+### triton.knobs Interface
 
-`triton.knobs` is the typed configuration interface introduced in upstream Triton 3.4. Triton-Ascend adds the `triton.knobs.ascend` group in Triton 3.6, wrapping some Ascend environment variables as fields that can be read and written in-process with scoped restoration. The group becomes available once the Ascend backend is imported:
+`triton.knobs` is the typed configuration interface introduced in upstream Triton 3.4: each field corresponds to an environment variable. If you only need to configure a setting once before startup, set the environment variable directly. Use `triton.knobs` when you need to read the current value in-process, change a setting temporarily, or restore it by scope. Upstream groups are provided directly by `triton.knobs`; Triton-Ascend adds the `triton.knobs.ascend` group in Triton 3.6. It becomes available once the Ascend backend is imported.
+
+#### Quick start
 
 ```python
 import triton
 import triton.backends.ascend.runtime  # registers the Ascend backend and installs triton.knobs.ascend
 
+# Show all fields and current values in a group
 print(triton.knobs.ascend.knobs)
+
+# Read and assign a field
+print(triton.knobs.compilation.dump_ir)
+triton.knobs.ascend.device_print = True
 ```
 
-### Read and write semantics
+Assignment affects subsequent reads and, by default, writes the environment variable too. See the read and write rules below.
+
+#### Read and write rules
 
 - Read: returns the in-process value first, then the environment variable, then the default.
 - Assign: stores an in-process value and, by default, writes the environment variable too.
@@ -83,6 +93,8 @@ print(triton.knobs.ascend.knobs)
 - `copy()`: copies the current in-process overrides and returns an independent group object.
 - `propagate_env = False`: assignment affects the current Python process only; subprocesses and tools that call `os.getenv` directly cannot see it. Use it only when no external reader depends on the variable.
 
+For example, to enable `device_print` temporarily and restore it after the block:
+
 ```python
 with triton.knobs.ascend.scope():
     triton.knobs.ascend.device_print = True
@@ -90,21 +102,106 @@ with triton.knobs.ascend.scope():
 # Restored after leaving the block
 ```
 
-### Field reference
+#### Groups
 
-| Field | Environment variable | Default | Description |
-|-------|----------------------|---------|-------------|
-| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | Passes the sanitizer switch to the Ascend NPU compiler. |
-| `print_ub_bits` | `ENABLE_PRINT_UB_BITS` | `False` | Requests the number of occupied UB bits from the compiler. |
-| `memory_display` | `TRITON_MEMORY_DISPLAY` | `False` | Requests compiler memory-usage output. |
-| `npu_compiler_path` | `TRITON_NPU_COMPILER_PATH` | `None` | Fallback NPU compiler tool directory used when packaged tools and `PATH` lookup fail. |
-| `enable_ubtuner` | `TRITON_ENABLE_UBTUNER` | `""` | Selects the UB tuning mode, `compile` or `run`. |
-| `autotune_parallel_compile` | `TRITON_AUTOTUNE_PARALLEL_COMPILE` | `True` | Controls parallel compilation in Ascend autotune. |
-| `bench_method` | `TRITON_BENCH_METHOD` | `"default"` | `npu` selects Ascend's `do_bench_npu`; `default` uses the shared benchmark path. |
-| `compile_only` | `TRITON_COMPILE_ONLY` | `False` | Skips kernel launches; compilation and launcher extension loading still run. |
-| `enable_taskqueue` | `TRITON_ENABLE_TASKQUEUE` | `True` | Controls the Ascend launcher's task queue. |
-| `device_print` | `TRITON_DEVICE_PRINT` | `False` | Enables the device GM buffer used by `tl.device_print`. |
-| `grid_warn_print` | `TRITON_GRID_WARN_PRINT` | `False` | Prints Ascend launcher warnings about grid size. |
+Find the group by purpose, then look up the field in "Field reference" below. If you only care about Ascend-specific switches, use `triton.knobs.ascend` directly.
+
+| Group | Purpose | Ascend support |
+|-------|---------|----------------|
+| `triton.knobs.ascend` | Ascend-specific compilation, autotuning, and launcher switches | Yes |
+| `triton.knobs.compilation` | Cache override, IR dump, debug information, and other compilation behavior | Yes |
+| `triton.knobs.runtime` | Interpreter mode and runtime switches | Some fields |
+| `triton.knobs.cache` | Cache directories and cache managers | Yes |
+| `triton.knobs.autotuning` | Autotune result caching and printing | Yes |
+| `triton.knobs.language` | Language-level defaults such as FP32 precision | Yes |
+| `triton.knobs.build` | Build tools for the CPU launcher extension | `cc` only |
+| `triton.knobs.redis` | Redis storage backend for remote caching | Yes |
+| `triton.knobs.nvidia` / `.amd` / `.proton` | Other backend-specific settings | Not used |
+
+#### Field reference
+
+Boolean fields return `True`/`False` in Python; set them to `1`/`0` through the environment variable. Defaults are the values returned when the environment variable is unset.
+
+**`triton.knobs.ascend`**
+
+| Field | Environment variable | Default | Value range | Description |
+|-------|----------------------|---------|-------------|-------------|
+| `enable_sanitizer` | `TRITON_ENABLE_SANITIZER` | `False` | `True` / `False` | Passes the sanitizer switch to the Ascend NPU compiler. |
+| `print_ub_bits` | `ENABLE_PRINT_UB_BITS` | `False` | `True` / `False` | Requests the number of occupied UB bits from the compiler. |
+| `memory_display` | `TRITON_MEMORY_DISPLAY` | `False` | `True` / `False` | Requests compiler memory-usage output. |
+| `npu_compiler_path` | `TRITON_NPU_COMPILER_PATH` | `None` | Directory path / `None` | Fallback NPU compiler tool directory used only when packaged tools and `PATH` lookup fail. |
+| `enable_ubtuner` | `TRITON_ENABLE_UBTUNER` | `""` | `""` (off), `"compile"`, `"run"` | Selects the UB tuning mode. |
+| `autotune_parallel_compile` | `TRITON_AUTOTUNE_PARALLEL_COMPILE` | `True` | `True` / `False` | Controls parallel compilation in Ascend autotune. |
+| `bench_method` | `TRITON_BENCH_METHOD` | `"default"` | `"default"`, `"npu"` | `npu` selects Ascend's `do_bench_npu`; `default` uses the shared benchmark path. |
+| `compile_only` | `TRITON_COMPILE_ONLY` | `False` | `True` / `False` | Skips kernel launches; compilation and launcher extension loading still run. |
+| `enable_taskqueue` | `TRITON_ENABLE_TASKQUEUE` | `True` | `True` / `False` | Controls the Ascend launcher's task queue. |
+| `device_print` | `TRITON_DEVICE_PRINT` | `False` | `True` / `False` | Enables the device GM buffer used by `tl.device_print`. |
+| `grid_warn_print` | `TRITON_GRID_WARN_PRINT` | `False` | `True` / `False` | Prints Ascend launcher warnings about grid size. |
+
+**`triton.knobs.compilation`**
+
+| Field | Environment variable | Default | Value range | Description |
+|-------|----------------------|---------|-------------|-------------|
+| `override` | `TRITON_KERNEL_OVERRIDE` | `False` | `True` / `False` | Loads an external IR or binary with a matching stage filename from the override directory. |
+| `dump_ir` | `TRITON_KERNEL_DUMP` | `False` | `True` / `False` | Saves compilation-stage artifacts and the final `npubin`; only applies to compilations that actually run. |
+| `dump_ir_extract_di_local_variables` | `LLVM_EXTRACT_DI_LOCAL_VARIABLES` | `False` | `True` / `False` | Requests debug-variable information from the BiSheng compiler. |
+| `store_binary_only` | `TRITON_STORE_BINARY_ONLY` | `False` | `True` / `False` | Writes only `cubin`/`hsaco`/`json` artifacts, not intermediate IR; the Ascend binary extension is `npubin`, which is not in that list. |
+| `always_compile` | `TRITON_ALWAYS_COMPILE` | `False` | `True` / `False` | Ignores compilation cache hits and recompiles kernels. |
+| `use_ir_loc` | `USE_IR_LOC` | `None` | `None`, a stage name (such as `"ttir"`), or a source-location snapshot | Rebuilds locations from the line numbers of the specified stage's IR file. |
+| `enable_asan` | `TRITON_ENABLE_ASAN` | `False` | `True` / `False` | Inserts the AddressSanitizer pass into the LLVM optimization pipeline for compiler debugging. |
+| `disable_line_info` | `TRITON_DISABLE_LINE_INFO` | `False` | `True` / `False` | Omits line information from the BiSheng request. The Ascend backend reads this variable directly and treats it as `True` when unset. |
+| `front_end_debugging` | `TRITON_FRONT_END_DEBUGGING` | `False` | `True` / `False` | Preserves the original Python traceback for frontend errors. |
+| `allow_non_constexpr_globals` | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | `False` | `True` / `False` | Allows non-`constexpr` globals in the JIT frontend. |
+
+**`triton.knobs.runtime`**
+
+| Field | Environment variable | Default | Value range | Description |
+|-------|----------------------|---------|-------------|-------------|
+| `interpret` | `TRITON_INTERPRET` | `False` | `True` / `False` | Runs supported Triton operations in the CPU interpreter. |
+| `override_arch` | `TRITON_OVERRIDE_ARCH` | `None` | Architecture string / `None` | Overrides the target architecture; the Ascend backend does not read it. |
+
+**`triton.knobs.cache`**
+
+| Field | Environment variable | Default | Value range | Description |
+|-------|----------------------|---------|-------------|-------------|
+| `home_dir` | `TRITON_HOME` | User home | Directory path | Base for the Triton cache, dump, and override directories. |
+| `dump_dir` | `TRITON_DUMP_DIR` | `$TRITON_HOME/.triton/dump` | Directory path | Output directory for IR dumps. |
+| `override_dir` | `TRITON_OVERRIDE_DIR` | `$TRITON_HOME/.triton/override` | Directory path | Directory containing override files. |
+| `dir` | `TRITON_CACHE_DIR` | `$TRITON_HOME/.triton/cache` | Directory path | Compilation cache directory. |
+| `manager_class` | `TRITON_CACHE_MANAGER` | `None` | `MODULE:CLASS` / `None` | Compilation cache manager; use `triton.runtime.cache:RemoteCacheManager` for remote caching. |
+| `remote_manager_class` | `TRITON_REMOTE_CACHE_BACKEND` | `None` | `MODULE:CLASS` / `None` | Remote cache storage backend; requires the remote cache manager. |
+
+**`triton.knobs.autotuning`**
+
+| Field | Environment variable | Default | Value range | Description |
+|-------|----------------------|---------|-------------|-------------|
+| `cache` | `TRITON_CACHE_AUTOTUNING` | `False` | `True` / `False` | Caches autotune selections. |
+| `print` | `TRITON_PRINT_AUTOTUNING` | `False` | `True` / `False` | Prints autotune results and normal-path compiler commands. |
+
+**`triton.knobs.language`**
+
+| Field | Environment variable | Default | Value range | Description |
+|-------|----------------------|---------|-------------|-------------|
+| `fp32_default` | `TRITON_F32_DEFAULT` | `None` | `None`, `"ieee"`, `"hf32"`, `"tf32"` (mapped to `hf32`) | Default FP32 input precision for `tl.dot`; `None` uses the backend default `ieee`. |
+| `default_fp_fusion` | `TRITON_DEFAULT_FP_FUSION` | `True` | `True` / `False` | Whether floating-point operation fusion is allowed by default. |
+
+**`triton.knobs.build`**
+
+| Field | Environment variable | Default | Value range | Description |
+|-------|----------------------|---------|-------------|-------------|
+| `cc` | `CC` | `None` | Compiler path or name / `None` | C/C++ compiler for the CPU launcher extension. |
+| `cudacrt_path` | `TRITON_CUDACRT_PATH` | `None` | Directory path / `None` | NVIDIA backend only. |
+| `cudart_path` | `TRITON_CUDART_PATH` | `None` | Directory path / `None` | NVIDIA backend only. |
+
+**`triton.knobs.redis`**
+
+| Field | Environment variable | Default | Value range | Description |
+|-------|----------------------|---------|-------------|-------------|
+| `key_format` | `TRITON_REDIS_KEY_FORMAT` | `"triton:{key}:{filename}"` | Format string containing `{key}` and `{filename}` | Remote cache key format. |
+| `host` | `TRITON_REDIS_HOST` | `"localhost"` | Hostname or IP | Redis address. |
+| `port` | `TRITON_REDIS_PORT` | `6379` | Integer, valid port `1`–`65535` | Redis port. |
+
+`launch_enter_hook`, `launch_exit_hook`, `kernel_load_start_hook`, `kernel_load_end_hook`, `jit_cache_hook`, `jit_post_compile_hook`, `add_stages_inspection_hook`, `compilation.listener`, and `build.impl` are assignable callback objects, not environment-variable fields.
 
 ## Compiler Options
 
