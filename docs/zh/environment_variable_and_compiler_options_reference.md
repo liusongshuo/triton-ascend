@@ -1,8 +1,6 @@
 # 环境变量与编译选项
 
-本文面向Triton-Ascend算子开发者，提供编译、运行、调试和自动调优配置的查阅入口，说明各配置项的用途、默认值及A2/A3、950支持情况。环境变量用于设置进程内的编译与运行行为，编译选项用于配置单个kernel。旧配置的迁移方式集中在文末的[编译选项清理与兼容性](#compiler-option-cleanup-and-compatibility)。
-
-`triton.knobs` 提供类型化的配置接口：上游分组可直接使用，Ascend 专用环境变量由 `triton.knobs.ascend` 包装，均可在进程内读写并支持作用域恢复。用法见下文环境变量一节的「triton.knobs 接口」。
+本文面向Triton-Ascend算子开发者，提供编译、运行、调试和自动调优配置的查阅入口，说明各配置项的用途、默认值及A2/A3、950支持情况。环境变量用于设置进程内的编译与运行行为，编译选项用于配置单个kernel；环境变量也可以不经启动脚本，直接通过 `triton.knobs`（含 Ascend 专用的 `triton.knobs.ascend` 分组）在进程内读写，见下文「triton.knobs 接口」一节。旧配置的迁移方式集中在文末的[编译选项清理与兼容性](#compiler-option-cleanup-and-compatibility)。
 
 ## 环境变量
 

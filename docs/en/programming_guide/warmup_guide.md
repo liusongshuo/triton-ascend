@@ -36,7 +36,6 @@ def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
 n = 1024
 grid = (triton.cdiv(n, 256),)
 
-# Compile without executing. `grid` must be passed explicitly.
 compiled = add_kernel.warmup(
     torch.float32, torch.float32, torch.float32, n,
     BLOCK_SIZE=256, grid=grid,
@@ -90,7 +89,6 @@ def add_kernel_autotune(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.con
 n = 1024
 grid = (1,)
 
-# Compile every candidate once. No benchmark, no selection.
 handles = add_kernel_autotune.warmup(
     torch.float32, torch.float32, torch.float32, n, grid=grid,
 )
