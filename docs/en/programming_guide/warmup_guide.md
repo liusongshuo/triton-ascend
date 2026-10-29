@@ -4,17 +4,15 @@
 
 `kernel.warmup(*args, grid=...)` compiles a kernel without executing it. The compiled artifact is written to the Triton cache, so a later real launch can load it directly. This makes warmup a good fit for paying the compilation cost at service startup or in CI.
 
-When to use warmup:
+Recommended for the following scenarios:
 
 - **Lower first-inference latency**: real requests no longer wait on compilation, with no first-request stall;
 - **Earlier compile-error exposure**: compile failures surface at startup or CI time instead of being deferred to runtime;
 - **Compile without executing**: verify a kernel compiles without allocating outputs or running it.
 
-Do not confuse it with `do_bench(warmup=...)`: that parameter runs the kernel several times before timing, while `kernel.warmup()` only compiles.
+## Using plain JIT kernels
 
-## Plain JIT kernels
-
-Take a vector-add kernel as an example, using `torch.dtype` placeholders in place of tensors:
+Take a vector-add kernel as an example:
 
 ```python
 import torch
@@ -35,7 +33,13 @@ def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
 
 n = 1024
 grid = (triton.cdiv(n, 256),)
+```
 
+### Scenario 1: Using dtype placeholders
+
+`warmup()` depends only on argument types and pointer attributes, not tensor contents, so it needs no device memory allocation or initialization—just pass a dtype. This is especially convenient when device memory is tight, or when a startup script or CI job does not have input data ready:
+
+```python
 compiled = add_kernel.warmup(
     torch.float32, torch.float32, torch.float32, n,
     BLOCK_SIZE=256, grid=grid,
@@ -43,11 +47,12 @@ compiled = add_kernel.warmup(
 print(compiled.metadata)
 ```
 
-There are three points to note when calling it:
+There are two points to note when calling it:
 
 - `grid` must be passed explicitly;
-- `warmup()` returns a `CompiledKernel`; `metadata`, `asm`, and other compilation results are available;
-- you do not need to allocate device memory for warmup: pass `torch.dtype` to use placeholders (as shown above).
+- `warmup()` returns a `CompiledKernel`; `metadata`, `asm`, and other compilation results are available.
+
+### Scenario 2: Passing real tensors
 
 A placeholder is treated as an ordinary tensor with a 16-byte-aligned pointer. If real inputs are slices or offset views with potentially misaligned pointers, pass real tensors so specialization matches the real launch:
 
@@ -58,7 +63,7 @@ out = torch.empty_like(x)
 compiled = add_kernel.warmup(x, y, out, n, BLOCK_SIZE=256, grid=grid)
 ```
 
-## Autotune kernels
+## Using autotune kernels
 
 If a kernel uses `@triton.autotune`, warmup compiles every candidate configuration; the call is the same as for a plain kernel:
 

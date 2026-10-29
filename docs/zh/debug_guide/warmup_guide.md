@@ -4,17 +4,15 @@
 
 `kernel.warmup(*args, grid=...)` 只编译 kernel，不执行。编译产物写入 Triton 缓存，后续真实 launch 可以直接命中，因此适合在服务启动或 CI 阶段提前承担编译开销。
 
-什么时候值得用 warmup：
+以下场景推荐使用：
 
 - **降低首次推理时延**：真实请求不再等待编译，冷启动无卡顿；
 - **提前暴露编译错误**：编译问题在启动或 CI 阶段即可发现，避免推迟到运行时；
 - **只验证编译、不执行**：可不分配输出、不实际运行，仅确认 kernel 能否编译。
 
-注意不要和 `do_bench(warmup=...)` 混淆：后者是计时前实际运行若干次，`kernel.warmup()` 只编译、不执行。
+## 普通 JIT kernel使用
 
-## 普通 JIT kernel
-
-以一个向量加法 kernel 为例，先用 `torch.dtype` 占位代替张量：
+以一个向量加法 kernel 为例：
 
 ```python
 import torch
@@ -35,7 +33,13 @@ def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
 
 n = 1024
 grid = (triton.cdiv(n, 256),)
+```
 
+### 场景一：用 dtype 占位
+
+`warmup()` 只依赖参数类型和指针属性，不读取张量内容，因此无需分配和初始化设备内存，给出 dtype 即可；在设备内存紧张，或启动脚本、CI 中尚未准备输入数据时尤其方便：
+
+```python
 compiled = add_kernel.warmup(
     torch.float32, torch.float32, torch.float32, n,
     BLOCK_SIZE=256, grid=grid,
@@ -43,11 +47,12 @@ compiled = add_kernel.warmup(
 print(compiled.metadata)
 ```
 
-调用时有三个要点：
+调用时有两个要点：
 
 - `grid` 必须显式传入；
-- `warmup()` 返回 `CompiledKernel`，可以读取 `metadata`、`asm` 等编译结果；
-- 不必为 warmup 分配设备内存：用 `torch.dtype` 占位即可（如上例）。
+- `warmup()` 返回 `CompiledKernel`，可以读取 `metadata`、`asm` 等编译结果。
+
+### 场景二：传真实张量
 
 占位符按“指针 16 字节对齐”的普通张量处理。如果真实输入是切片、偏移视图等可能未对齐的指针，应传真实张量，否则编译特化可能不同：
 
@@ -58,7 +63,7 @@ out = torch.empty_like(x)
 compiled = add_kernel.warmup(x, y, out, n, BLOCK_SIZE=256, grid=grid)
 ```
 
-## Autotune kernel
+## Autotune kernel使用
 
 如果 kernel 使用了 `@triton.autotune`，warmup 会编译每个候选配置，写法与普通 kernel 相同：
 

@@ -99,9 +99,17 @@ with triton.knobs.ascend.scope():
 # 退出 with 块后恢复
 ```
 
+**模块级**
+
+以下设置作用于 `triton.knobs` 整体，不属于任何分组。`propagate_env` 没有对应的环境变量，只能通过 Python 赋值设置：
+
+| 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
+|------|----------|--------|----------|------|
+| `propagate_env` | — | `True` | `True` / `False` | 控制 knob 赋值是否同步写回 `os.environ`；为 `False` 时只影响当前进程。 |
+
 #### 分组一览
 
-先按用途找到分组，再到下方字段表查具体字段；只关心 Ascend 专用开关时直接看 `triton.knobs.ascend`。
+下表按用途列出各配置分组，各分组的字段说明见后续章节；如需仅关注 Ascend 专用开关，请直接查阅 `triton.knobs.ascend` 分组。
 
 | 分组 | 用途 | Ascend 适用 |
 |------|------|-------------|
@@ -114,12 +122,6 @@ with triton.knobs.ascend.scope():
 | [`triton.knobs.build`](#knobs-build) | CPU launcher 扩展的编译工具与自定义构建入口 | 仅 `cc`、`impl` 适用 |
 | [`triton.knobs.redis`](#knobs-redis) | 远程缓存的 Redis 存储后端 | 支持 |
 | `triton.knobs.nvidia` / `.amd` / `.proton` | 其他后端专用 | 不使用 |
-
-**模块级**
-
-| 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
-|------|----------|--------|----------|------|
-| `propagate_env` | | `True` | `True` / `False` | 控制 knob 赋值是否同步写回 `os.environ`；为 `False` 时只影响当前进程。 |
 
 <a id="knobs-ascend"></a>
 
@@ -156,7 +158,7 @@ with triton.knobs.ascend.scope():
 | `front_end_debugging` | `TRITON_FRONT_END_DEBUGGING` | `False` | `True` / `False` | 前端错误发生时保留原始 Python 异常堆栈。 |
 | `allow_non_constexpr_globals` | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | `False` | `True` / `False` | 允许 JIT 前端引用非 `constexpr` 全局变量。 |
 | `instrumentation_mode` | `TRITON_INSTRUMENTATION_MODE` | `""` | `""`（关闭）、`"consan"` | Ascend 不支持。 |
-| `listener` | | `None` | `CompilationListener` / `None` | 编译完成（含缓存命中）后调用，接收 `src`、`metadata`、`metadata_group`、`times`、`cache_hit`，可用于统计编译耗时。 |
+| `listener` | — | `None` | `CompilationListener` / `None` | 编译完成（含缓存命中）后调用，接收 `src`、`metadata`、`metadata_group`、`times`、`cache_hit`，可用于统计编译耗时。 |
 
 <a id="knobs-runtime"></a>
 
@@ -167,13 +169,13 @@ with triton.knobs.ascend.scope():
 | `interpret` | `TRITON_INTERPRET` | `False` | `True` / `False` | 在 CPU 解释器中执行其支持的 Triton 操作。 |
 | `override_arch` | `TRITON_OVERRIDE_ARCH` | `None` | 架构字符串 / `None` | Ascend 不支持。 |
 | `debug` | `TRITON_DEBUG` | `False` | `True` / `False` | 开启 JIT 调试及设备断言；环境变量在模块导入时读取一次。 |
-| `launch_enter_hook` | | `HookChain()` | `HookChain[LaunchHook]` | kernel 启动前调用，参数为 launch metadata；用 `.add(func)` / `.remove(func)` 增删回调。 |
-| `launch_exit_hook` | | `HookChain(reversed=True)` | `HookChain[LaunchHook]` | kernel 启动后调用；链按注册顺序的逆序执行。 |
-| `kernel_load_start_hook` | | `HookChain()` | `HookChain[InitHandleHook]` | kernel 二进制/模块加载前调用，此时 `module`、`function` 可能为 `None`。 |
-| `kernel_load_end_hook` | | `HookChain(reversed=True)` | `HookChain[InitHandleHook]` | 加载完成后调用；链按注册顺序的逆序执行。 |
-| `jit_cache_hook` | | `None` | `JITHook` / `None` | 每次 JIT 编译前调用，可检查 key、签名和编译选项；返回真值时跳过本次编译。 |
-| `jit_post_compile_hook` | | `None` | `JITHook` / `None` | JIT 编译调用结束后调用；同一 kernel 的 `jit_cache_hook` 总在它之前。 |
-| `add_stages_inspection_hook` | | `None` | `PipelineStagesHook` / `None` | Ascend 不支持。 |
+| `launch_enter_hook` | — | `HookChain()` | `HookChain[LaunchHook]` | kernel 启动前调用，参数为 launch metadata；用 `.add(func)` / `.remove(func)` 增删回调。 |
+| `launch_exit_hook` | — | `HookChain(reversed=True)` | `HookChain[LaunchHook]` | kernel 启动后调用；链按注册顺序的逆序执行。 |
+| `kernel_load_start_hook` | — | `HookChain()` | `HookChain[InitHandleHook]` | kernel 二进制/模块加载前调用，此时 `module`、`function` 可能为 `None`。 |
+| `kernel_load_end_hook` | — | `HookChain(reversed=True)` | `HookChain[InitHandleHook]` | 加载完成后调用；链按注册顺序的逆序执行。 |
+| `jit_cache_hook` | — | `None` | `JITHook` / `None` | 每次 JIT 编译前调用，可检查 key、签名和编译选项；返回真值时跳过本次编译。 |
+| `jit_post_compile_hook` | — | `None` | `JITHook` / `None` | JIT 编译调用结束后调用；同一 kernel 的 `jit_cache_hook` 总在它之前。 |
+| `add_stages_inspection_hook` | — | `None` | `PipelineStagesHook` / `None` | Ascend 不支持。 |
 
 <a id="knobs-cache"></a>
 
@@ -215,7 +217,7 @@ with triton.knobs.ascend.scope():
 | `cc` | `CC` | `None` | 编译器路径或名称 / `None` | CPU launcher 扩展的 C/C++ 编译器。 |
 | `cudacrt_path` | `TRITON_CUDACRT_PATH` | `None` | 目录路径 / `None` | Ascend 不支持。 |
 | `cudart_path` | `TRITON_CUDART_PATH` | `None` | 目录路径 / `None` | Ascend 不支持。 |
-| `impl` | | `None` | `BuildImpl` / `None` | 替代默认的本地编译流程，用于生成 CPU launcher 扩展；签名为 `(name, src, srcdir, library_dirs, include_dirs, libraries)`。 |
+| `impl` | — | `None` | `BuildImpl` / `None` | 替代默认的本地编译流程，用于生成 CPU launcher 扩展；签名为 `(name, src, srcdir, library_dirs, include_dirs, libraries)`。 |
 
 <a id="knobs-redis"></a>
 

@@ -99,9 +99,17 @@ with triton.knobs.ascend.scope():
 # Restored after leaving the block
 ```
 
+**Module-level**
+
+The settings below apply to `triton.knobs` as a whole and belong to no group. `propagate_env` has no corresponding environment variable and can only be set through Python assignment:
+
+| Field | Environment variable | Default | Value range | Description |
+|-------|----------------------|---------|-------------|-------------|
+| `propagate_env` | — | `True` | `True` / `False` | Controls whether knob assignments are written back to `os.environ`; when `False`, assignments affect only the current process. |
+
 #### Groups
 
-Find the group by purpose, then look up the field in the tables below. If you only care about Ascend-specific switches, use `triton.knobs.ascend` directly.
+The table below lists each configuration group by purpose; the fields of each group are described in the following sections. If you are interested only in Ascend-specific switches, refer directly to the `triton.knobs.ascend` group.
 
 | Group | Purpose | Ascend support |
 |-------|---------|----------------|
@@ -114,12 +122,6 @@ Find the group by purpose, then look up the field in the tables below. If you on
 | [`triton.knobs.build`](#knobs-build) | Build tools and a custom build entry point for the CPU launcher extension | `cc` and `impl` only |
 | [`triton.knobs.redis`](#knobs-redis) | Redis storage backend for remote caching | Yes |
 | `triton.knobs.nvidia` / `.amd` / `.proton` | Other backend-specific settings | Not used |
-
-**Module-level**
-
-| Field | Environment variable | Default | Value range | Description |
-|-------|----------------------|---------|-------------|-------------|
-| `propagate_env` | | `True` | `True` / `False` | Controls whether knob assignments are written back to `os.environ`; when `False`, assignments affect only the current process. |
 
 <a id="knobs-ascend"></a>
 
@@ -156,7 +158,7 @@ Find the group by purpose, then look up the field in the tables below. If you on
 | `front_end_debugging` | `TRITON_FRONT_END_DEBUGGING` | `False` | `True` / `False` | Preserves the original Python traceback for frontend errors. |
 | `allow_non_constexpr_globals` | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | `False` | `True` / `False` | Allows non-`constexpr` globals in the JIT frontend. |
 | `instrumentation_mode` | `TRITON_INSTRUMENTATION_MODE` | `""` | `""` (off), `"consan"` | Not supported on Ascend. |
-| `listener` | | `None` | `CompilationListener` / `None` | Called after compilation (including cache hits) with `src`, `metadata`, `metadata_group`, `times`, and `cache_hit`; useful for compile-time statistics. |
+| `listener` | — | `None` | `CompilationListener` / `None` | Called after compilation (including cache hits) with `src`, `metadata`, `metadata_group`, `times`, and `cache_hit`; useful for compile-time statistics. |
 
 <a id="knobs-runtime"></a>
 
@@ -167,13 +169,13 @@ Find the group by purpose, then look up the field in the tables below. If you on
 | `interpret` | `TRITON_INTERPRET` | `False` | `True` / `False` | Runs supported Triton operations in the CPU interpreter. |
 | `override_arch` | `TRITON_OVERRIDE_ARCH` | `None` | Architecture string / `None` | Not supported on Ascend. |
 | `debug` | `TRITON_DEBUG` | `False` | `True` / `False` | Enables JIT debugging and device assertions; the environment variable is read once at module import. |
-| `launch_enter_hook` | | `HookChain()` | `HookChain[LaunchHook]` | Called before kernel launch with the launch metadata; add or remove callbacks with `.add(func)` / `.remove(func)`. |
-| `launch_exit_hook` | | `HookChain(reversed=True)` | `HookChain[LaunchHook]` | Called after kernel launch; the chain runs in reverse registration order. |
-| `kernel_load_start_hook` | | `HookChain()` | `HookChain[InitHandleHook]` | Called before the kernel binary/module is loaded; `module` and `function` may be `None` at this point. |
-| `kernel_load_end_hook` | | `HookChain(reversed=True)` | `HookChain[InitHandleHook]` | Called after loading completes; the chain runs in reverse registration order. |
-| `jit_cache_hook` | | `None` | `JITHook` / `None` | Called before each JIT compilation with the key, signature, and compile options; a truthy return skips this compilation. |
-| `jit_post_compile_hook` | | `None` | `JITHook` / `None` | Called after the JIT compilation call returns; `jit_cache_hook` for the same kernel always runs before it. |
-| `add_stages_inspection_hook` | | `None` | `PipelineStagesHook` / `None` | Not supported on Ascend. |
+| `launch_enter_hook` | — | `HookChain()` | `HookChain[LaunchHook]` | Called before kernel launch with the launch metadata; add or remove callbacks with `.add(func)` / `.remove(func)`. |
+| `launch_exit_hook` | — | `HookChain(reversed=True)` | `HookChain[LaunchHook]` | Called after kernel launch; the chain runs in reverse registration order. |
+| `kernel_load_start_hook` | — | `HookChain()` | `HookChain[InitHandleHook]` | Called before the kernel binary/module is loaded; `module` and `function` may be `None` at this point. |
+| `kernel_load_end_hook` | — | `HookChain(reversed=True)` | `HookChain[InitHandleHook]` | Called after loading completes; the chain runs in reverse registration order. |
+| `jit_cache_hook` | — | `None` | `JITHook` / `None` | Called before each JIT compilation with the key, signature, and compile options; a truthy return skips this compilation. |
+| `jit_post_compile_hook` | — | `None` | `JITHook` / `None` | Called after the JIT compilation call returns; `jit_cache_hook` for the same kernel always runs before it. |
+| `add_stages_inspection_hook` | — | `None` | `PipelineStagesHook` / `None` | Not supported on Ascend. |
 
 <a id="knobs-cache"></a>
 
@@ -215,7 +217,7 @@ Find the group by purpose, then look up the field in the tables below. If you on
 | `cc` | `CC` | `None` | Compiler path or name / `None` | C/C++ compiler for the CPU launcher extension. |
 | `cudacrt_path` | `TRITON_CUDACRT_PATH` | `None` | Directory path / `None` | Not supported on Ascend. |
 | `cudart_path` | `TRITON_CUDART_PATH` | `None` | Directory path / `None` | Not supported on Ascend. |
-| `impl` | | `None` | `BuildImpl` / `None` | Replaces the default local build path for the CPU launcher extension; signature is `(name, src, srcdir, library_dirs, include_dirs, libraries)`. |
+| `impl` | — | `None` | `BuildImpl` / `None` | Replaces the default local build path for the CPU launcher extension; signature is `(name, src, srcdir, library_dirs, include_dirs, libraries)`. |
 
 <a id="knobs-redis"></a>
 
