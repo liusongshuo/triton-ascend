@@ -1,6 +1,6 @@
 # Environment Variables and Compiler Options
 
-This page is a configuration reference for Triton-Ascend kernel developers. It lists settings for compilation, execution, debugging, and autotuning, with their purpose, defaults, and support on A2/A3 and 950. Environment variables configure compilation and runtime behavior within a process; compiler options configure individual kernels. Environment variables can also be read and written in-process through `triton.knobs` (including the Ascend-specific `triton.knobs.ascend` group), without editing startup scripts; see "triton.knobs Interface" under [Environment Variables](#environment-variables) below. Migration advice for existing configurations appears under [Compiler Option Cleanup and Compatibility](#compiler-option-cleanup-and-compatibility).
+This page is a configuration reference for Triton-Ascend kernel developers. It lists settings for compilation, execution, debugging, and autotuning, with their purpose, defaults, and support on A2/A3 and 950. Environment variables configure compilation and runtime behavior within a process; compiler options configure individual kernels. Environment variables can also be read and written in-process through `triton.knobs` (including the Ascend-specific `triton.knobs.ascend` group), without editing startup scripts. Migration advice for existing configurations appears under [Compiler Option Cleanup and Compatibility](#compiler-option-cleanup-and-compatibility).
 
 ## Environment Variables
 
