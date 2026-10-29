@@ -1,4 +1,4 @@
-# Triton-Ascend warmup 使用指南
+# Warmup使用指南
 
 ## 概述
 
