@@ -99,9 +99,13 @@ with triton.knobs.ascend.scope():
 # 退出 with 块后恢复
 ```
 
-**模块级**
+#### 模块级字段
 
-以下设置作用于 `triton.knobs` 整体，不属于任何分组。`propagate_env` 没有对应的环境变量，只能通过 Python 赋值设置：
+`propagate_env` 作用于 `triton.knobs` 整体，不属于任何分组，也没有对应环境变量，只能通过 Python 赋值：
+
+```python
+triton.knobs.propagate_env = False  # 之后的赋值不再写回 os.environ
+```
 
 | 字段 | 环境变量 | 默认值 | 取值范围 | 说明 |
 |------|----------|--------|----------|------|

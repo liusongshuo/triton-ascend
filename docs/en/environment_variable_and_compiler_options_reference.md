@@ -99,9 +99,13 @@ with triton.knobs.ascend.scope():
 # Restored after leaving the block
 ```
 
-**Module-level**
+#### Module-level fields
 
-The settings below apply to `triton.knobs` as a whole and belong to no group. `propagate_env` has no corresponding environment variable and can only be set through Python assignment:
+`propagate_env` applies to `triton.knobs` as a whole, belongs to no group, and has no corresponding environment variable; it can only be set through Python assignment:
+
+```python
+triton.knobs.propagate_env = False  # subsequent assignments are no longer written to os.environ
+```
 
 | Field | Environment variable | Default | Value range | Description |
 |-------|----------------------|---------|-------------|-------------|
